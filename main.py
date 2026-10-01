@@ -1,10 +1,11 @@
+import os
 import discord
 from discord.ext import commands
-import os
-from dotenv import load_dotenv
-load_dotenv()
+from aiohttp import web
 
-TOKEN= os.getenv("TOKEN")
+
+TOKEN = os.getenv("DISCORD_TOKEN")
+
 
 class TaticalTeam(commands.Bot):
     def __init__(self):
@@ -35,6 +36,34 @@ async def ola(interaction: discord.Interaction):
     await interaction.response.send_message("Olá Mundo!")
 
 
-import os
+# Página necessária para o Render
+async def health_check(request):
+    return web.Response(text="Tatical Team está online!")
 
-bot.run(TOKEN)
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", health_check)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+
+    port = int(os.getenv("PORT", 10000))
+
+    site = web.TCPSite(
+        runner,
+        "0.0.0.0",
+        port
+    )
+
+    await site.start()
+
+
+async def main():
+    await start_web_server()
+    await bot.start(TOKEN)
+
+
+import asyncio
+
+asyncio.run(main())
