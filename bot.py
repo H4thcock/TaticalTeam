@@ -31,7 +31,7 @@ def criar_banco():
     banco = conectar_banco()
     cursor = banco.cursor()
 
-    # Tabela dos jogadores e seus TKs
+    # Tabela responsável pelos Team Kills
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS team_kills (
             user_id INTEGER PRIMARY KEY,
@@ -39,7 +39,7 @@ def criar_banco():
         )
     """)
 
-    # Configuração do painel
+    # Tabela responsável pelo painel
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS painel (
             id INTEGER PRIMARY KEY,
@@ -54,7 +54,7 @@ def criar_banco():
 
 
 # =========================================================
-# CONTROLE DOS TKs
+# ADICIONAR TK
 # =========================================================
 
 def adicionar_tk(user_id):
@@ -74,6 +74,10 @@ def adicionar_tk(user_id):
     banco.close()
 
 
+# =========================================================
+# REMOVER TK
+# =========================================================
+
 def remover_tk(user_id):
 
     banco = conectar_banco()
@@ -91,6 +95,10 @@ def remover_tk(user_id):
     banco.commit()
     banco.close()
 
+
+# =========================================================
+# OBTER RANKING
+# =========================================================
 
 def obter_ranking():
 
@@ -111,6 +119,10 @@ def obter_ranking():
     return resultado
 
 
+# =========================================================
+# OBTER TOTAL DE TKs
+# =========================================================
+
 def obter_total():
 
     banco = conectar_banco()
@@ -128,6 +140,10 @@ def obter_total():
     return total
 
 
+# =========================================================
+# RESETAR TODOS OS TKs
+# =========================================================
+
 def resetar_tks():
 
     banco = conectar_banco()
@@ -142,7 +158,7 @@ def resetar_tks():
 
 
 # =========================================================
-# PAINEL
+# GERAR PAINEL
 # =========================================================
 
 async def gerar_painel():
@@ -163,15 +179,21 @@ async def gerar_painel():
         for posicao, (user_id, kills) in enumerate(ranking):
 
             try:
+
                 usuario = await bot.fetch_user(user_id)
+
                 nome = usuario.mention
 
             except discord.NotFound:
+
                 nome = f"<@{user_id}>"
 
             if posicao < 3:
+
                 medalha = medalhas[posicao]
+
             else:
+
                 medalha = f"`{posicao + 1}º`"
 
             texto += (
@@ -197,6 +219,10 @@ async def gerar_painel():
     return embed
 
 
+# =========================================================
+# ATUALIZAR PAINEL
+# =========================================================
+
 async def atualizar_painel():
 
     banco = conectar_banco()
@@ -212,6 +238,7 @@ async def atualizar_painel():
 
     banco.close()
 
+    # Se ainda não existe painel configurado
     if not dados:
         return
 
@@ -232,9 +259,14 @@ async def atualizar_painel():
 
     except discord.NotFound:
 
+        # Se o painel antigo foi apagado,
+        # cria outro automaticamente.
+
         embed = await gerar_painel()
 
-        mensagem = await canal.send(embed=embed)
+        mensagem = await canal.send(
+            embed=embed
+        )
 
         banco = conectar_banco()
         cursor = banco.cursor()
@@ -283,7 +315,9 @@ bot = TaticalTeam()
 @bot.event
 async def on_ready():
 
-    print(f"✅ {bot.user} está online!")
+    print(
+        f"✅ {bot.user} está online!"
+    )
 
 
 # =========================================================
@@ -297,14 +331,71 @@ tk = app_commands.Group(
 
 
 # =========================================================
+# /TK ADICIONAR
+# =========================================================
+# PERMISSÃO: TODOS
+# =========================================================
+
+@tk.command(
+    name="adicionar",
+    description="Adiciona 1 Team Kill para um jogador."
+)
+async def tk_adicionar(
+    interaction: discord.Interaction,
+    jogador: discord.Member
+):
+
+    adicionar_tk(jogador.id)
+
+    await atualizar_painel()
+
+    await interaction.response.send_message(
+        f"💀 **+1 TK** registrado para {jogador.mention}!",
+        ephemeral=True
+    )
+
+
+# =========================================================
+# /TK REMOVER
+# =========================================================
+# PERMISSÃO: SOMENTE ADMINISTRADORES
+# =========================================================
+
+@tk.command(
+    name="remover",
+    description="Remove 1 Team Kill de um jogador."
+)
+@app_commands.checks.has_permissions(
+    administrator=True
+)
+async def tk_remover(
+    interaction: discord.Interaction,
+    jogador: discord.Member
+):
+
+    remover_tk(jogador.id)
+
+    await atualizar_painel()
+
+    await interaction.response.send_message(
+        f"↩️ **-1 TK** removido de {jogador.mention}!",
+        ephemeral=True
+    )
+
+
+# =========================================================
 # /TK PAINEL
+# =========================================================
+# PERMISSÃO: SOMENTE ADMINISTRADORES
 # =========================================================
 
 @tk.command(
     name="painel",
-    description="Cria o painel de Team Kills neste canal."
+    description="Cria ou fixa o painel de Team Kills neste canal."
 )
-@app_commands.checks.has_permissions(manage_guild=True)
+@app_commands.checks.has_permissions(
+    administrator=True
+)
 async def tk_painel(
     interaction: discord.Interaction
 ):
@@ -343,61 +434,15 @@ async def tk_painel(
     banco.close()
 
     await interaction.response.send_message(
-        "✅ Painel de Team Kills criado!",
-        ephemeral=True
-    )
-
-
-# =========================================================
-# /TK ADICIONAR
-# =========================================================
-
-@tk.command(
-    name="adicionar",
-    description="Adiciona 1 Team Kill para um jogador."
-)
-@app_commands.checks.has_permissions(manage_guild=True)
-async def tk_adicionar(
-    interaction: discord.Interaction,
-    jogador: discord.Member
-):
-
-    adicionar_tk(jogador.id)
-
-    await atualizar_painel()
-
-    await interaction.response.send_message(
-        f"💀 **+1 TK** registrado para {jogador.mention}!",
-        ephemeral=True
-    )
-
-
-# =========================================================
-# /TK REMOVER
-# =========================================================
-
-@tk.command(
-    name="remover",
-    description="Remove 1 Team Kill de um jogador."
-)
-@app_commands.checks.has_permissions(manage_guild=True)
-async def tk_remover(
-    interaction: discord.Interaction,
-    jogador: discord.Member
-):
-
-    remover_tk(jogador.id)
-
-    await atualizar_painel()
-
-    await interaction.response.send_message(
-        f"↩️ **-1 TK** removido de {jogador.mention}!",
+        "✅ Painel de Team Kills configurado neste canal!",
         ephemeral=True
     )
 
 
 # =========================================================
 # /TK RANKING
+# =========================================================
+# PERMISSÃO: TODOS
 # =========================================================
 
 @tk.command(
@@ -418,12 +463,16 @@ async def tk_ranking(
 # =========================================================
 # /TK RESET
 # =========================================================
+# PERMISSÃO: SOMENTE ADMINISTRADORES
+# =========================================================
 
 @tk.command(
     name="reset",
     description="Zera todos os Team Kills."
 )
-@app_commands.checks.has_permissions(administrator=True)
+@app_commands.checks.has_permissions(
+    administrator=True
+)
 async def tk_reset(
     interaction: discord.Interaction
 ):
@@ -438,14 +487,14 @@ async def tk_reset(
 
 
 # =========================================================
-# ADICIONA O GRUPO TK AO BOT
+# ADICIONAR GRUPO /TK AO BOT
 # =========================================================
 
 bot.tree.add_command(tk)
 
 
 # =========================================================
-# TRATAMENTO DE PERMISSÕES
+# TRATAMENTO DE ERROS DOS COMANDOS
 # =========================================================
 
 @bot.tree.error
@@ -466,11 +515,13 @@ async def on_app_command_error(
 
         return
 
-    print(f"❌ Erro: {error}")
+    print(
+        f"❌ Erro: {error}"
+    )
 
 
 # =========================================================
-# SERVIDOR WEB DO RENDER
+# SERVIDOR WEB PARA O RENDER
 # =========================================================
 
 async def health_check(request):
@@ -510,7 +561,7 @@ async def iniciar_servidor_web():
 
 
 # =========================================================
-# INICIAR TUDO
+# INICIAR BOT
 # =========================================================
 
 async def main():
@@ -519,5 +570,9 @@ async def main():
 
     await bot.start(TOKEN)
 
+
+# =========================================================
+# EXECUTAR
+# =========================================================
 
 asyncio.run(main())
