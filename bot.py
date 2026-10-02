@@ -1,10 +1,13 @@
 import os
 import asyncio
-import aiohttp
 from aiohttp import web
 import discord
 from discord.ext import commands
 
+
+# =========================
+# BOT DISCORD
+# =========================
 
 class TaticalTeam(commands.Bot):
     def __init__(self):
@@ -23,7 +26,7 @@ bot = TaticalTeam()
 
 
 # =========================
-# SERVIDOR HTTP DO RENDER
+# SERVIDOR HTTP
 # =========================
 
 async def home(request):
@@ -55,7 +58,7 @@ async def start_web_server():
 
 
 # =========================
-# EVENTOS DO BOT
+# EVENTOS
 # =========================
 
 @bot.event
