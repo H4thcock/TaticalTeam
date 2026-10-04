@@ -45,6 +45,19 @@ def iniciar_banco():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS team_kills_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action TEXT NOT NULL,
+            target_user_id INTEGER NOT NULL,
+            target_username TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            executor_user_id INTEGER NOT NULL,
+            executor_username TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -98,6 +111,65 @@ def remover_kill(user_id, quantidade=1):
     conn.close()
 
     return nova_quantidade
+
+
+def registrar_auditoria(
+    action,
+    target_user_id,
+    target_username,
+    quantity,
+    executor_user_id,
+    executor_username
+):
+    conn = conectar_banco()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO team_kills_audit (
+            action,
+            target_user_id,
+            target_username,
+            quantity,
+            executor_user_id,
+            executor_username,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+    """, (
+        action,
+        target_user_id,
+        target_username,
+        quantity,
+        executor_user_id,
+        executor_username
+    ))
+
+    conn.commit()
+    conn.close()
+
+
+def obter_auditoria(limite=20):
+    conn = conectar_banco()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT
+            action,
+            target_user_id,
+            target_username,
+            quantity,
+            executor_user_id,
+            executor_username,
+            created_at
+        FROM team_kills_audit
+        ORDER BY id DESC
+        LIMIT ?
+    """, (limite,))
+
+    resultados = cursor.fetchall()
+    conn.close()
+
+    return resultados
 
 
 def resetar_kills():
@@ -386,6 +458,15 @@ async def tk_adicionar(
         quantidade
     )
 
+    registrar_auditoria(
+        "ADICIONOU",
+        jogador.id,
+        jogador.display_name,
+        quantidade,
+        interaction.user.id,
+        interaction.user.display_name
+    )
+
     await atualizar_painel()
 
     await interaction.response.send_message(
@@ -533,17 +614,138 @@ async def tk_remover(
 
         return
 
+    # Descobre quantos TKs realmente existiam antes da remoção.
+    conn = conectar_banco()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT kills FROM team_kills WHERE user_id = ?",
+        (jogador.id,)
+    )
+    resultado_anterior = cursor.fetchone()
+    conn.close()
+
+    kills_antes = resultado_anterior[0] if resultado_anterior else 0
+    quantidade_real_removida = min(quantidade, kills_antes)
+
     nova_quantidade = remover_kill(
         jogador.id,
         quantidade
     )
 
+    # Só registra a quantidade que realmente foi removida.
+    if quantidade_real_removida > 0:
+        registrar_auditoria(
+            "REMOVEU",
+            jogador.id,
+            jogador.display_name,
+            quantidade_real_removida,
+            interaction.user.id,
+            interaction.user.display_name
+        )
+
     await atualizar_painel()
 
+    if quantidade_real_removida == 0:
+        mensagem_remocao = (
+            f"⚠️ {jogador.mention} não possui Team Kills para remover.\n\n"
+            f"📊 Total atual: **{nova_quantidade}**"
+        )
+    elif quantidade_real_removida < quantidade:
+        mensagem_remocao = (
+            f"🗑️ Foram removidas **{quantidade_real_removida}** Team Kill(s) "
+            f"de {jogador.mention}.\n\n"
+            f"⚠️ Foram solicitadas **{quantidade}**, mas o jogador possuía "
+            f"apenas **{quantidade_real_removida}**.\n\n"
+            f"📊 Total atual: **{nova_quantidade}**"
+        )
+    else:
+        mensagem_remocao = (
+            f"🗑️ Foram removidas **{quantidade_real_removida}** Team Kill(s) "
+            f"de {jogador.mention}.\n\n"
+            f"📊 Total atual: **{nova_quantidade}**"
+        )
+
     await interaction.response.send_message(
-        f"🗑️ Foram removidas **{quantidade}** Team Kill(s) "
-        f"de {jogador.mention}.\n\n"
-        f"📊 Total atual: **{nova_quantidade}**",
+        mensagem_remocao,
+        ephemeral=True
+    )
+
+
+# ============================================================
+# /TK AUDITORIA
+# SOMENTE ADMINISTRADORES
+# ============================================================
+
+@tk.command(
+    name="auditoria",
+    description="Mostra o histórico de adições e remoções de Team Kills."
+)
+@app_commands.default_permissions(administrator=True)
+async def tk_auditoria(
+    interaction: discord.Interaction
+):
+    # SEGURANÇA
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "❌ Você precisa ser **Administrador** para consultar a auditoria.",
+            ephemeral=True
+        )
+        return
+
+    registros = obter_auditoria(20)
+
+    embed = discord.Embed(
+        title="📋 AUDITORIA — TEAM KILLS",
+        description="Últimas alterações registradas no sistema.",
+        color=discord.Color.blurple()
+    )
+
+    if not registros:
+        embed.add_field(
+            name="📊 Histórico",
+            value="Nenhuma adição ou remoção foi registrada ainda.",
+            inline=False
+        )
+    else:
+        linhas = []
+
+        for (
+            action,
+            target_user_id,
+            target_username,
+            quantity,
+            executor_user_id,
+            executor_username,
+            created_at
+        ) in registros:
+            if action == "ADICIONOU":
+                icone = "🟢"
+                sinal = "+"
+            else:
+                icone = "🔴"
+                sinal = "-"
+
+            linhas.append(
+                f"{icone} **{action}** `{sinal}{quantity}` TK\n"
+                f"🎯 Jogador: **{target_username}** "
+                f"(<@{target_user_id}>)\n"
+                f"👮 Responsável: **{executor_username}** "
+                f"(<@{executor_user_id}>)\n"
+                f"🕐 `{created_at}`"
+            )
+
+        embed.add_field(
+            name="📜 Registros",
+            value="\n\n".join(linhas),
+            inline=False
+        )
+
+    embed.set_footer(
+        text="Tatical Team • Auditoria de Team Kills • Últimos 20 registros"
+    )
+
+    await interaction.response.send_message(
+        embed=embed,
         ephemeral=True
     )
 
